@@ -685,15 +685,32 @@
                 const oldLevel = player.level;
                 player.level += count;
                 player.killCount += count;
-                player.updateStats();
-                updateStatsUI();
-
+                
+                if (player.level >= 500 && oldLevel < 500) {
+                    player.rank = "UltiMeow";
+                    player.baseAttack += 9999999999999999999999999999;
+                    showMessage("RANK UP! ULTIMEOW! ATK + ???", 5000);
+                } else if (player.level >= 300 && oldLevel < 300) {
+                    player.rank = "Legendary VIP";
+                    player.baseAttack += 10000000;
+                    showMessage("RANK UP! LEGENDARY VIP! ATK +10,000,000!", 4000);
+                } else if (player.level >= 100 && oldLevel < 100) {
+                    player.rank = "Legendary";
+                    player.baseAttack += 5000;
+                    showMessage("RANK UP! LEGENDARY! ATK +5,000!", 4000);
+                }
+                
                 if (player.level >= 50 && oldLevel < 50) {
                     evolvePlayer();
                 }
+
+                player.updateStats();
+                updateStatsUI();
             }
             if (Math.floor(player.killCount / KILLS_PER_RANK) > Math.floor(oldKillCount / KILLS_PER_RANK)) {
-                rankUp(Math.floor(player.killCount / KILLS_PER_RANK));
+                if (!["Legendary", "Legendary VIP", "UltiMeow"].includes(player.rank)) {
+                    rankUp(Math.floor(player.killCount / KILLS_PER_RANK));
+                }
             }
             if (count > 0 && !bossFightActive) {
                 spawnEnemies(count);
@@ -727,8 +744,6 @@
             
             player.baseHp += 1000;
             player.baseAttack += 1000;
-            player.updateStats();
-            updateStatsUI();
             showMessage("Stats greatly increased!", 3000);
 
             const flashLight = new THREE.PointLight(0xffffff, 10, 100);
