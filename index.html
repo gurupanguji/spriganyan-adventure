@@ -98,7 +98,7 @@
     </style>
 </head>
 <body>
-    <div id="game-container">
+    <div id="game-container" style="opacity: 1;">
         <header class="game-header">
             <h1 class="text-xl md:text-3xl font-bold text-white">Sprigatitonyan's Adventure 3D</h1>
             <p id="instructions" class="text-xs md:text-sm mt-2">Arrows: Move | Y/A/T: Attacks | G: Taunt</p>
@@ -154,7 +154,8 @@
         // --- Game State ---
         const player = {
             name: 'Sprigatitonyan', level: 1, baseHp: 1000, baseAttack: 300, hp: 1000, attack: 300,
-            gridX: 4, gridY: 4, isMoving: false, isAttacking: false, pawsOfFuryUnlocked: false, catWaveUnlocked: false,
+            gridX: 4, gridY: 4, isMoving: false, isAttacking: false, 
+            pawsOfFuryUnlocked: false, catWaveUnlocked: false,
             killCount: 0, rank: 'G', mesh: null, aura: null,
             isEvolved: false, materials: {},
             targetPosition: new THREE.Vector3(),
@@ -339,7 +340,6 @@
             if (player.level >= 30 && !player.catWaveUnlocked) {
                 player.catWaveUnlocked = true;
                 catWaveUI.classList.remove('hidden');
-                instructionsElement.textContent = "Arrows: Move | Y/A/T: Attacks | G: Taunt";
                 showMessage("Learned CAT WAVE! Press 'T' to use!", 3000);
             }
             if (bossFightActive && boss) {
@@ -432,12 +432,12 @@
             if(player.isMoving || player.isAttacking) return;
             
             let totalDamage, message;
-            const attackRadius = TILE_SIZE * 1.5;
-
+            
             if (type === 'salmon') {
                 player.isAttacking = true;
                 totalDamage = player.attack + 1000;
                 message = 'Smoked Salmon Blade!';
+                const attackRadius = TILE_SIZE * 1.5;
                 
                 const swordGeo = new THREE.BoxGeometry(2, 30, 1);
                 const hiltGeo = new THREE.BoxGeometry(5, 5, 2);
@@ -494,13 +494,15 @@
             } else { // fury
                 player.isAttacking = true;
                 totalDamage = Math.floor(player.attack / 2) * 3;
-                message = 'Paws of Fury!';
+                message = player.isEvolved ? 'Glitch Wave!' : 'Paws of Fury!';
 
                 let hitMessage = '';
                 let enemiesToAttack = [];
+                const attackRadius = player.isEvolved ? MAP_DIM : TILE_SIZE * 1.5;
+
                 if (bossFightActive && boss) {
                     if (player.mesh.position.distanceTo(boss.mesh.position) < attackRadius) {
-                        enemiesToAttack.push(boss);
+                       enemiesToAttack.push(boss);
                     }
                 } else {
                     enemiesToAttack = enemies.filter(e => player.mesh.position.distanceTo(e.mesh.position) < attackRadius);
@@ -686,23 +688,7 @@
                 player.level += count;
                 player.killCount += count;
                 
-                if (player.level >= 500 && oldLevel < 500) {
-                    player.rank = "UltiMeow";
-                    player.baseAttack += 9999999999999999999999999999;
-                    showMessage("RANK UP! ULTIMEOW! ATK + ???", 5000);
-                } else if (player.level >= 300 && oldLevel < 300) {
-                    player.rank = "Legendary VIP";
-                    player.baseAttack += 10000000;
-                    showMessage("RANK UP! LEGENDARY VIP! ATK +10,000,000!", 4000);
-                } else if (player.level >= 100 && oldLevel < 100) {
-                    player.rank = "Legendary";
-                    player.baseAttack += 5000;
-                    showMessage("RANK UP! LEGENDARY! ATK +5,000!", 4000);
-                }
-                
-                if (player.level >= 50 && oldLevel < 50) {
-                    evolvePlayer();
-                }
+                checkUnlocks(oldLevel);
 
                 player.updateStats();
                 updateStatsUI();
@@ -731,6 +717,27 @@
             }
         }
 
+        function checkUnlocks(oldLevel) {
+            if (player.level >= 500 && oldLevel < 500) {
+                player.rank = "UltiMeow";
+                player.baseAttack += 9999999999999999999999999999;
+                player.baseHp += 99999;
+                showMessage("RANK UP! ULTIMEOW! ATK + ??? | HP +99,999!", 5000);
+            } else if (player.level >= 300 && oldLevel < 300) {
+                player.rank = "Legendary VIP";
+                player.baseAttack += 10000000;
+                showMessage("RANK UP! LEGENDARY VIP! ATK +10,000,000!", 4000);
+            } else if (player.level >= 100 && oldLevel < 100) {
+                player.rank = "Legendary";
+                player.baseAttack += 5000;
+                showMessage("RANK UP! LEGENDARY! ATK +5,000!", 4000);
+            }
+            
+            if (player.level >= 50 && oldLevel < 50) {
+                evolvePlayer();
+            }
+        }
+
         function evolvePlayer() {
             if (player.isEvolved) return;
             player.isEvolved = true;
@@ -741,6 +748,7 @@
             player.materials.paw.color.set(0x000000); // Black
             player.materials.eye.color.set(0x34d399); // Green
             player.materials.nick.color.set(0x2a5a9e); // Darker blue for nick
+            pawsOfFuryUI.textContent = "A: Glitch Wave";
             
             player.baseHp += 1000;
             player.baseAttack += 1000;
@@ -812,7 +820,13 @@
                 gridY = Math.floor(Math.random() * MAP_SIZE);
             } while (gridX === player.gridX && gridY === player.gridY);
             
-            boss = { maxHp: 10000, hp: 10000, attack: 50, gridX, gridY };
+            let bossMaxHp = 10000;
+            if (player.rank === "UltiMeow") {
+                bossMaxHp = 1000000000000000000000000000;
+                showMessage("The Alpha Dog is empowered by your UltiMeow rank!", 4000);
+            }
+            boss = { maxHp: bossMaxHp, hp: bossMaxHp, attack: 50, gridX, gridY };
+            
             const group = new THREE.Group();
             const mat = new THREE.MeshStandardMaterial({ color: 0xff4444, roughness: 0.4 });
             
@@ -1008,6 +1022,8 @@
                 case 'y': case 'Y': salmonBladeAttack(); break;
                 case 'a': case 'A': pawsOfFuryAttack(); break;
                 case 't': case 'T': catWaveAttack(); break;
+                case 'r': case 'R': catastropheAttack(); break;
+                case 'k': case 'K': legendaryBladeAttack(); break;
                 case 'g': case 'G': tauntBoss(); break;
             }
         };
@@ -1072,7 +1088,6 @@
             createPlayer();
             updateStatsUI();
             spawnEnemies(4);
-            showMessage("Welcome to the new 3D World!", 3000);
             onWindowResize();
             animate();
         }
