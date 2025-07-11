@@ -78,6 +78,20 @@
             border-radius: 8px;
             transition: width 0.5s ease;
         }
+        .soultimate-gauge {
+            background-color: #4a5568;
+            border: 2px solid #a0aec0;
+            border-radius: 10px;
+            padding: 2px;
+            margin-top: 1rem;
+        }
+        .soultimate-gauge-inner {
+            height: 10px;
+            background-color: #f6ad55;
+            border-radius: 6px;
+            width: 0%;
+            transition: width 0.5s ease;
+        }
         .win-message {
             position: fixed;
             top: 50%;
@@ -101,7 +115,7 @@
     <div id="game-container" style="opacity: 1;">
         <header class="game-header">
             <h1 class="text-xl md:text-3xl font-bold text-white">Sprigatitonyan's Adventure 3D</h1>
-            <p id="instructions" class="text-xs md:text-sm mt-2">Arrows: Move | Y/A/T: Attacks | G: Taunt</p>
+            <p id="instructions" class="text-xs md:text-sm mt-2">Arrows: Move | Y: Claws | A: Soultimate | S: Summon | E: Claw Rush | R: Inspirit | G: Taunt | K: Giganta-Blade</p>
         </header>
 
         <main id="canvas-container">
@@ -117,12 +131,24 @@
                 <div><span class="font-bold text-yellow-400">Attack:</span><span id="stat-attack" class="float-right text-white"></span></div>
                 <div><span class="font-bold text-blue-400">Level:</span><span id="stat-level" class="float-right text-white"></span></div>
                 <div><span class="font-bold text-purple-400">Rank:</span><span id="stat-rank" class="float-right text-white"></span></div>
+                <div><span class="font-bold text-cyan-400">Medals:</span><span id="stat-medals" class="float-right text-white"></span></div>
+                <div><span class="font-bold text-teal-400">Yo-kai Watch:</span><span id="stat-watch" class="float-right text-white"></span></div>
+                
+                <div class="pt-4">
+                    <div class="font-bold text-orange-400 mb-1">Soultimate</div>
+                    <div class="soultimate-gauge"><div id="soultimate-gauge-inner" class="soultimate-gauge-inner"></div></div>
+                </div>
+
                 <div class="border-t border-gray-600 pt-4 mt-4">
                     <div class="font-bold text-pink-400">Special Attacks</div>
                     <div id="attack-list" class="text-xs mt-2 space-y-1">
-                         <div>Y: Smoked Salmon Blade</div>
-                         <div id="paws-of-fury-ui" class="hidden">A: Paws of Fury</div>
+                         <div>Y: Sharp Claws</div>
+                         <div id="paws-of-fury-ui" class="hidden">A: Paws of Fury (Soultimate)</div>
                          <div id="cat-wave-ui" class="hidden">T: Cat Wave</div>
+                         <div id="claw-rush-ui" class="hidden">E: Claw Rush</div>
+                         <div id="giganta-blade-ui" class="hidden">K: Giganta-Blade</div>
+                         <div id="inspirit-ui" class="hidden">R: Inspirit</div>
+                         <div id="summon-ui">S: Summon Ally</div>
                          <div id="taunt-ui" class="hidden">G: ✨ Taunt Boss</div>
                     </div>
                 </div>
@@ -143,9 +169,9 @@
         const MAP_SIZE = 8;
         const TILE_SIZE = 10;
         const MAP_DIM = MAP_SIZE * TILE_SIZE;
-        const BOSS_TRIGGER_COUNT = (MAP_SIZE * MAP_SIZE) - 10;
         const KILLS_PER_RANK = 10;
         const RANK_ORDER = ['G', 'F', 'E', 'D', 'C', 'B', 'A', 'S'];
+        const ALLY_LIFETIME = 30000; // 30 seconds
         let gameOver = false;
         let bossFightActive = false;
         let bossAttackInterval = null;
@@ -155,7 +181,10 @@
         const player = {
             name: 'Sprigatitonyan', level: 1, baseHp: 1000, baseAttack: 300, hp: 1000, attack: 300,
             gridX: 4, gridY: 4, isMoving: false, isAttacking: false, 
-            pawsOfFuryUnlocked: false, catWaveUnlocked: false,
+            pawsOfFuryUnlocked: false, catWaveUnlocked: false, inspiritUnlocked: false, clawRushUnlocked: false, gigantaBladeUnlocked: false,
+            soultimateGauge: 0, maxSoultimate: 100,
+            yokaiMedals: 0,
+            hasYokaiWatch: false,
             killCount: 0, rank: 'G', mesh: null, aura: null,
             isEvolved: false, materials: {},
             targetPosition: new THREE.Vector3(),
@@ -167,10 +196,19 @@
                 this.hp += newMaxHp - oldMaxHp;
                 if (this.hp > newMaxHp) this.hp = newMaxHp;
                 this.attack = this.baseAttack + (this.level - 1) * 30;
+            },
+            addSoultimate: function(amount) {
+                this.soultimateGauge += amount;
+                if (this.soultimateGauge > this.maxSoultimate) {
+                    this.soultimateGauge = this.maxSoultimate;
+                }
+                updateStatsUI();
             }
         };
         const enemies = [];
+        const alliedYoKai = [];
         let nextEnemyId = 0;
+        let nextAllyId = 0;
         let boss = null;
         const activeEffects = [];
 
@@ -178,11 +216,15 @@
         const messageBox = document.getElementById('message-box');
         const pawsOfFuryUI = document.getElementById('paws-of-fury-ui');
         const catWaveUI = document.getElementById('cat-wave-ui');
+        const inspiritUI = document.getElementById('inspirit-ui');
+        const clawRushUI = document.getElementById('claw-rush-ui');
+        const gigantaBladeUI = document.getElementById('giganta-blade-ui');
         const tauntUI = document.getElementById('taunt-ui');
         const instructionsElement = document.getElementById('instructions');
         const bossHealthBar = document.getElementById('boss-health-bar');
         const bossHealthBarInner = document.getElementById('boss-health-bar-inner');
         const winMessageElement = document.getElementById('win-message');
+        const soultimateGaugeInner = document.getElementById('soultimate-gauge-inner');
 
         // --- Three.js Setup ---
         const scene = new THREE.Scene();
@@ -331,11 +373,31 @@
             document.getElementById('stat-attack').textContent = player.attack;
             document.getElementById('stat-level').textContent = player.level;
             document.getElementById('stat-rank').textContent = player.rank;
+            document.getElementById('stat-medals').textContent = player.yokaiMedals;
+            document.getElementById('stat-watch').textContent = player.hasYokaiWatch ? 'YES' : 'NO';
             
+            const soultimatePercent = (player.soultimateGauge / player.maxSoultimate) * 100;
+            soultimateGaugeInner.style.width = `${soultimatePercent}%`;
+
             if (player.level >= 2 && !player.pawsOfFuryUnlocked) {
                 player.pawsOfFuryUnlocked = true;
                 pawsOfFuryUI.classList.remove('hidden');
                 showMessage("Learned Paws of Fury! Press 'A' to use!", 3000);
+            }
+            if (player.level >= 5 && !player.inspiritUnlocked) {
+                player.inspiritUnlocked = true;
+                inspiritUI.classList.remove('hidden');
+                showMessage("Learned Inspirit! Press 'R' to use!", 3000);
+            }
+             if (player.level >= 10 && !player.clawRushUnlocked) {
+                player.clawRushUnlocked = true;
+                clawRushUI.classList.remove('hidden');
+                showMessage("Learned Claw Rush! Press 'E' to use!", 3000);
+            }
+             if (player.level >= 15 && !player.gigantaBladeUnlocked) {
+                player.gigantaBladeUnlocked = true;
+                gigantaBladeUI.classList.remove('hidden');
+                showMessage("Learned Giganta-Blade! Press 'K' to use!", 3000);
             }
             if (player.level >= 30 && !player.catWaveUnlocked) {
                 player.catWaveUnlocked = true;
@@ -376,8 +438,10 @@
         }
         
         // --- Player Attacks ---
-        function salmonBladeAttack() { if (!player.isAttacking && !gameOver) performAoEAttack('salmon'); }
+        function sharpClawsAttack() { if (!player.isAttacking && !gameOver) performAoEAttack('claws'); }
         function pawsOfFuryAttack() { if (!player.isAttacking && !gameOver && player.pawsOfFuryUnlocked) performAoEAttack('fury'); }
+        function clawRushAttack() { if (!player.isAttacking && !gameOver && player.clawRushUnlocked) performAoEAttack('clawRush'); }
+        function gigantaBladeAttack() { if (!player.isAttacking && !gameOver && player.gigantaBladeUnlocked) performAoEAttack('gigantaBlade'); }
         
         function catWaveAttack() {
             if (player.isAttacking || gameOver || !player.catWaveUnlocked) return;
@@ -389,7 +453,27 @@
             const enemiesToAttack = [...enemies];
             handleEnemyDefeat(enemiesToAttack, enemiesToAttack.length);
             showMessage("CAT WAVE! All enemies obliterated!", 3000);
+            player.addSoultimate(20);
             setTimeout(() => { player.isAttacking = false; }, 1500);
+        }
+
+        function inspiritBoss() {
+            if (player.isAttacking || gameOver || !bossFightActive || !player.inspiritUnlocked) return;
+            player.isAttacking = true;
+            
+            if (Math.random() < 0.6) { // 60% chance to succeed
+                showMessage("Inspirit successful! Boss attack lowered!", 3000);
+                boss.attackModifier = 0.5;
+                createAuraEffect(boss.mesh, 0x800080, 'inspirit'); // Purple aura
+                setTimeout(() => {
+                    if (boss) boss.attackModifier = 1.0;
+                    showMessage("Boss is no longer inspirited.", 2000);
+                }, 10000); // Lasts 10 seconds
+            } else {
+                showMessage("Inspirit failed!", 2000);
+            }
+
+            setTimeout(() => { player.isAttacking = false; }, 1000);
         }
 
         async function tauntBoss() {
@@ -403,7 +487,7 @@
             try {
                 const chatHistory = [{ role: "user", parts: [{ text: prompt }] }];
                 const payload = { contents: chatHistory };
-                const apiKey = "";
+                const apiKey = ""; // API Key is handled by the environment
                 const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
                 
                 const response = await fetch(apiUrl, {
@@ -433,72 +517,61 @@
             
             let totalDamage, message;
             
-            if (type === 'salmon') {
+            if (type === 'claws') {
                 player.isAttacking = true;
-                totalDamage = player.attack + 1000;
-                message = 'Smoked Salmon Blade!';
+                totalDamage = player.attack;
+                message = 'Sharp Claws!';
                 const attackRadius = TILE_SIZE * 1.5;
                 
-                const swordGeo = new THREE.BoxGeometry(2, 30, 1);
-                const hiltGeo = new THREE.BoxGeometry(5, 5, 2);
-                const swordMat = new THREE.MeshStandardMaterial({ color: 0xf687b3, emissive: 0xff69b4, metalness: 0.2, roughness: 0.3, transparent: true });
+                for(let i = 0; i < 3; i++) {
+                    createSlashEffect(player.mesh.position, i * 100);
+                }
                 
-                const sword = new THREE.Mesh(swordGeo, swordMat);
-                const hilt = new THREE.Mesh(hiltGeo, swordMat);
-                sword.add(hilt);
-                hilt.position.y = -14;
-                
-                sword.position.set(0, 15, 5);
-                player.mesh.add(sword);
+                let hitMessage = '';
+                let enemiesToAttack = [];
+                if (bossFightActive && boss) {
+                    if (player.mesh.position.distanceTo(boss.mesh.position) < attackRadius) enemiesToAttack.push(boss);
+                } else {
+                    enemiesToAttack = enemies.filter(e => player.mesh.position.distanceTo(e.mesh.position) < attackRadius);
+                }
 
-                activeEffects.push({
-                    mesh: sword,
-                    startTime: Date.now(),
-                    duration: 1200,
-                    type: 'giantSwordSlam',
-                    radius: attackRadius,
-                    slammed: false,
-                    dealDamage: () => {
-                        let hitMessage = '';
-                        let enemiesToAttack = [];
-                        if (bossFightActive && boss) {
-                            if (player.mesh.position.distanceTo(boss.mesh.position) < attackRadius) enemiesToAttack.push(boss);
-                        } else {
-                            enemiesToAttack = enemies.filter(e => player.mesh.position.distanceTo(e.mesh.position) < attackRadius);
-                        }
-
-                        if (enemiesToAttack.length > 0) {
-                            if (bossFightActive) {
-                                boss.hp -= totalDamage;
-                                if (boss.hp < 0) boss.hp = 0;
-                                hitMessage = ` Hit the BOSS for ${totalDamage} DMG!`;
-                                updateStatsUI();
-                                if (boss.hp <= 0) endGame(true);
-                            } else {
-                                let enemiesDefeatedCount = 0;
-                                hitMessage = ' Hit:';
-                                enemiesToAttack.forEach(enemy => {
-                                    enemy.hp -= totalDamage;
-                                    if (enemy.hp <= 0) enemiesDefeatedCount++;
-                                });
-                                handleEnemyDefeat(enemiesToAttack, enemiesDefeatedCount);
-                            }
-                        } else {
-                             message += ' ...but it hit nothing!';
-                        }
-                        showMessage(message + hitMessage, 3500);
+                if (enemiesToAttack.length > 0) {
+                    player.addSoultimate(10);
+                    if (bossFightActive) {
+                        boss.hp -= totalDamage;
+                        if (boss.hp < 0) boss.hp = 0;
+                        hitMessage = ` Hit the BOSS for ${totalDamage} DMG!`;
+                        updateStatsUI();
+                        if (boss.hp <= 0) endGame(true);
+                    } else {
+                        let enemiesDefeatedCount = 0;
+                        enemiesToAttack.forEach(enemy => {
+                            enemy.hp -= totalDamage;
+                            if (enemy.hp <= 0) enemiesDefeatedCount++;
+                        });
+                        handleEnemyDefeat(enemiesToAttack, enemiesDefeatedCount);
                     }
-                });
-                setTimeout(() => { player.isAttacking = false; }, 1200);
+                } else {
+                     message += ' ...but it hit nothing!';
+                }
+                showMessage(message + hitMessage, 2500);
+                setTimeout(() => { player.isAttacking = false; }, 600);
 
-            } else { // fury
+            } else if (type === 'fury') {
+                if (player.soultimateGauge < player.maxSoultimate) {
+                    showMessage("Soultimate not ready!", 2000);
+                    return;
+                }
                 player.isAttacking = true;
-                totalDamage = Math.floor(player.attack / 2) * 3;
-                message = player.isEvolved ? 'Glitch Wave!' : 'Paws of Fury!';
+                player.soultimateGauge = 0;
+                updateStatsUI();
+
+                totalDamage = player.attack * 5;
+                message = player.isEvolved ? 'Glitch Wave!' : 'PAWS OF FURY!';
 
                 let hitMessage = '';
                 let enemiesToAttack = [];
-                const attackRadius = player.isEvolved ? MAP_DIM : TILE_SIZE * 1.5;
+                const attackRadius = player.isEvolved ? MAP_DIM : TILE_SIZE * 2;
 
                 if (bossFightActive && boss) {
                     if (player.mesh.position.distanceTo(boss.mesh.position) < attackRadius) {
@@ -509,8 +582,8 @@
                 }
 
                 enemiesToAttack.forEach(enemy => {
-                    for (let i = 0; i < 5; i++) {
-                        createJibanyanPawsEffect(enemy.mesh.position, i * 60);
+                    for (let i = 0; i < 15; i++) { // More paws for Soultimate
+                        createJibanyanPawsEffect(enemy.mesh.position, i * 30);
                     }
                 });
 
@@ -523,7 +596,6 @@
                         if (boss.hp <= 0) endGame(true);
                     } else {
                         let enemiesDefeatedCount = 0;
-                        hitMessage = ' Hit:';
                         enemiesToAttack.forEach(enemy => {
                             enemy.hp -= totalDamage;
                             if (enemy.hp <= 0) enemiesDefeatedCount++;
@@ -534,57 +606,208 @@
                      message += ' ...but it hit nothing!';
                 }
                 showMessage(message + hitMessage, 3500);
-                setTimeout(() => { player.isAttacking = false; }, 600);
+                setTimeout(() => { player.isAttacking = false; }, 1000);
+            } else if (type === 'clawRush') {
+                const attackRadius = TILE_SIZE * 1.5; // Approx 1 tile radius
+                let nearestEnemy = null;
+                let minDistance = Infinity;
+                
+                const potentialTargets = bossFightActive ? (boss ? [boss] : []) : enemies;
+                potentialTargets.forEach(enemy => {
+                    const distance = player.mesh.position.distanceTo(enemy.mesh.position);
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        nearestEnemy = enemy;
+                    }
+                });
+
+                if (!nearestEnemy || minDistance > attackRadius) {
+                    showMessage("No target in range for Claw Rush!", 2000);
+                    return;
+                }
+                
+                player.isAttacking = true;
+                totalDamage = player.attack * 2.5;
+                message = 'Claw Rush!';
+                
+                // NEW: Use Paws of Fury-style effect for Claw Rush
+                for (let i = 0; i < 8; i++) {
+                    createJibanyanPawsEffect(nearestEnemy.mesh.position, i * 60);
+                }
+
+                setTimeout(() => {
+                    if (bossFightActive) {
+                        boss.hp -= totalDamage;
+                        if (boss.hp < 0) boss.hp = 0;
+                        if (boss.hp <= 0) endGame(true);
+                    } else {
+                        nearestEnemy.hp -= totalDamage;
+                        if (nearestEnemy.hp <= 0) handleEnemyDefeat([nearestEnemy], 1);
+                    }
+                    player.addSoultimate(25);
+                    showMessage(`${message} Hit for ${totalDamage} DMG!`, 2500);
+                    updateStatsUI();
+                }, 800);
+
+                setTimeout(() => { player.isAttacking = false; }, 1200);
+            } else if (type === 'gigantaBlade') {
+                player.isAttacking = true;
+                message = 'Giganta-Blade!';
+                const attackRadius = TILE_SIZE * 1.5;
+
+                let enemiesToAttack = [];
+                if (bossFightActive && boss) {
+                    if (player.mesh.position.distanceTo(boss.mesh.position) < attackRadius) enemiesToAttack.push(boss);
+                } else {
+                    enemiesToAttack = enemies.filter(e => player.mesh.position.distanceTo(e.mesh.position) < attackRadius);
+                }
+
+                if (enemiesToAttack.length > 0) {
+                    const baseDamage = player.attack * 3.5;
+                    const totalDamagePerEnemy = baseDamage * enemiesToAttack.length; // Damage scales with number of targets
+
+                    player.addSoultimate(30);
+                    
+                    const swordSynth = new Tone.Synth({
+                        oscillator: { type: 'triangle' },
+                        envelope: { attack: 0.005, decay: 0.1, sustain: 0.01, release: 0.1 }
+                    }).toDestination();
+                    swordSynth.volume.value = -15;
+                    
+                    let soundDelayCounter = 0; // Counter for unique sound scheduling
+
+                    enemiesToAttack.forEach(target => {
+                        for(let i = 0; i < 25; i++) {
+                            createSwordEffect(target.mesh.position, i * 25);
+                            swordSynth.triggerAttackRelease("A5", "32n", Tone.now() + (soundDelayCounter * 25) / 1000);
+                            soundDelayCounter++;
+                        }
+                    });
+
+                    setTimeout(() => {
+                        if (bossFightActive) {
+                            boss.hp -= totalDamagePerEnemy;
+                            if (boss.hp < 0) boss.hp = 0;
+                            showMessage(`${message} Hit the BOSS for ${totalDamagePerEnemy} DMG!`, 2500);
+                            updateStatsUI();
+                            if (boss.hp <= 0) endGame(true);
+                        } else {
+                            let enemiesDefeatedCount = 0;
+                            enemiesToAttack.forEach(enemy => {
+                                enemy.hp -= totalDamagePerEnemy;
+                                if (enemy.hp <= 0) enemiesDefeatedCount++;
+                            });
+                            handleEnemyDefeat(enemiesToAttack, enemiesDefeatedCount);
+                            showMessage(`${message} Hit ${enemiesToAttack.length} enemies for ${totalDamagePerEnemy} DMG each!`, 3000);
+                        }
+                    }, 800);
+
+                } else {
+                     message += ' ...but there were no targets!';
+                     showMessage(message, 2500);
+                }
+                
+                setTimeout(() => { player.isAttacking = false; }, 1500);
             }
         }
 
         // --- Attack Visuals ---
-        function createShockwaveEffect(position, color, maxRadius, duration) {
-            const geometry = new THREE.RingGeometry(maxRadius * 0.95, maxRadius, 64);
-            const material = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: true });
-            const shockwave = new THREE.Mesh(geometry, material);
-            shockwave.position.copy(position);
-            shockwave.position.y += 0.1;
-            shockwave.rotation.x = -Math.PI / 2;
-            shockwave.scale.set(0.01, 0.01, 0.01);
-            scene.add(shockwave);
-            activeEffects.push({ mesh: shockwave, startTime: Date.now(), duration: duration * 1000, type: 'shockwave' });
+        function createSlashEffect(position, delay) {
+            const slashGeo = new THREE.TorusGeometry(TILE_SIZE * 0.8, 0.3, 2, 32, Math.PI);
+            const slashMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true });
+            const slash = new THREE.Mesh(slashGeo, slashMat);
+            slash.position.copy(position).add(new THREE.Vector3(0, 4, 0));
+            slash.rotation.y = Math.random() * Math.PI * 2;
+            slash.rotation.x = (Math.random() - 0.5) * Math.PI;
+            scene.add(slash);
+            activeEffects.push({
+                mesh: slash,
+                startTime: Date.now() + delay,
+                duration: 300,
+                type: 'slash'
+            });
+        }
+        
+        function createSwordEffect(targetPosition, delay) {
+            const sword = new THREE.Group();
+            const bladeMat = new THREE.MeshStandardMaterial({
+                color: 0xc0c0c0, metalness: 0.9, roughness: 0.4,
+                emissive: new THREE.Color(Math.random(), Math.random(), Math.random()),
+                emissiveIntensity: 0.8
+            });
+            const hiltMat = new THREE.MeshStandardMaterial({ color: 0x4a2c2a, roughness: 0.8 });
+            const guardMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.7, roughness: 0.5 });
+            const bladeGeo = new THREE.BoxGeometry(0.4, 4, 0.1);
+            const hiltGeo = new THREE.CylinderGeometry(0.2, 0.2, 1, 8);
+            const guardGeo = new THREE.BoxGeometry(1, 0.2, 0.2);
+            const blade = new THREE.Mesh(bladeGeo, bladeMat);
+            const hilt = new THREE.Mesh(hiltGeo, hiltMat);
+            const guard = new THREE.Mesh(guardGeo, guardMat);
+            blade.position.y = 2;
+            hilt.position.y = -0.5;
+            sword.add(blade, hilt, guard);
+            const startPos = player.mesh.position.clone().add(new THREE.Vector3(0, 4, 0));
+            sword.position.copy(startPos);
+            sword.lookAt(targetPosition);
+            scene.add(sword);
+            activeEffects.push({
+                mesh: sword, startTime: Date.now() + delay, duration: 400, type: 'sword',
+                startPosition: startPos,
+                targetPosition: targetPosition.clone().add(new THREE.Vector3(
+                    (Math.random() - 0.5) * 5, 3, (Math.random() - 0.5) * 5
+                ))
+            });
+        }
+
+        function createAuraEffect(targetMesh, color, effectId, duration = 10000) {
+            const existingAuraIndex = activeEffects.findIndex(e => e.type === 'aura' && e.effectId === effectId);
+            if (existingAuraIndex > -1) {
+                scene.remove(activeEffects[existingAuraIndex].mesh);
+                activeEffects.splice(existingAuraIndex, 1);
+            }
+
+            const auraGeo = new THREE.SphereGeometry(4, 16, 16);
+            const auraMat = new THREE.MeshStandardMaterial({
+                color: color, transparent: true, opacity: 0.4,
+                emissive: color, emissiveIntensity: 2
+            });
+            const aura = new THREE.Mesh(auraGeo, auraMat);
+            aura.position.copy(targetMesh.position);
+            scene.add(aura);
+
+            activeEffects.push({
+                mesh: aura, target: targetMesh, startTime: Date.now(),
+                duration: duration, type: 'aura', effectId: effectId
+            });
         }
         
         function createJibanyanPawsEffect(targetPosition, delay) {
             const pawGeo = new THREE.SphereGeometry(1.5, 8, 8);
             const pawMat = new THREE.MeshStandardMaterial({
-                color: 0xadd8e6,
-                emissive: 0x87cefa,
-                transparent: true,
-                opacity: 0.9
+                color: 0xadd8e6, emissive: 0x87cefa,
+                transparent: true, opacity: 0.9
             });
             const paw = new THREE.Mesh(pawGeo, pawMat);
 
             const startPos = player.mesh.position.clone().add(new THREE.Vector3(
-                (Math.random() - 0.5) * 5,
-                2,
-                (Math.random() - 0.5) * 5
+                (Math.random() - 0.5) * 10, 2, (Math.random() - 0.5) * 10
             ));
             paw.position.copy(startPos);
 
             scene.add(paw);
             activeEffects.push({
-                mesh: paw,
-                startTime: Date.now() + delay,
-                duration: 400,
-                type: 'jibanyanPaw',
+                mesh: paw, startTime: Date.now() + delay, duration: 400, type: 'jibanyanPaw',
                 startPosition: startPos,
-                targetPosition: targetPosition.clone().add(new THREE.Vector3(0, 3, 0))
+                targetPosition: targetPosition.clone().add(new THREE.Vector3(
+                    (Math.random() - 0.5) * 3, 3, (Math.random() - 0.5) * 3
+                ))
             });
         }
 
         function createExplosionEffect(position) {
             const particleCount = 100;
             const particleMat = new THREE.MeshStandardMaterial({
-                color: 0xd9534f,
-                transparent: true,
-                opacity: 1.0
+                color: 0xd9534f, transparent: true, opacity: 1.0
             });
 
             for (let i = 0; i < particleCount; i++) {
@@ -592,17 +815,12 @@
                 const particle = new THREE.Mesh(particleGeo, particleMat.clone());
                 particle.position.copy(position);
                 const velocity = new THREE.Vector3(
-                    (Math.random() - 0.5) * 50,
-                    (Math.random()) * 50,
-                    (Math.random() - 0.5) * 50
+                    (Math.random() - 0.5) * 50, (Math.random()) * 50, (Math.random() - 0.5) * 50
                 );
                 scene.add(particle);
                 activeEffects.push({
-                    mesh: particle,
-                    startTime: Date.now(),
-                    duration: 1000 + Math.random() * 500,
-                    type: 'explosionParticle',
-                    velocity: velocity
+                    mesh: particle, startTime: Date.now(), duration: 1000 + Math.random() * 500,
+                    type: 'explosionParticle', velocity: velocity
                 });
             }
         }
@@ -620,29 +838,48 @@
                     .add(perpendicular.clone().multiplyScalar(offset))
                     .sub(direction.clone().multiplyScalar(TILE_SIZE));
 
-                const dogModel = createDogModel(true);
+                const dogModel = createDogModel({isShadow: true});
                 dogModel.position.copy(startPos);
                 dogModel.lookAt(player.mesh.position);
                 scene.add(dogModel);
 
                 activeEffects.push({
-                    mesh: dogModel,
-                    startTime: Date.now(),
-                    duration: 2000,
-                    type: 'dogWave',
-                    velocity: direction.clone().multiplyScalar(waveSpeed)
+                    mesh: dogModel, startTime: Date.now(), duration: 2000,
+                    type: 'dogWave', velocity: direction.clone().multiplyScalar(waveSpeed)
                 });
             }
         }
+        
+        function createMedalEffect(position) {
+            const medalGeo = new THREE.CylinderGeometry(2, 2, 0.5, 16);
+            const medalMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.8, roughness: 0.3, transparent: true });
+            const medal = new THREE.Mesh(medalGeo, medalMat);
+            medal.position.copy(position).add(new THREE.Vector3(0, 3, 0));
+            scene.add(medal);
+
+            activeEffects.push({
+                mesh: medal, startTime: Date.now(), duration: 1500, type: 'medal'
+            });
+
+            const synth = new Tone.Synth({ oscillator: { type: 'sine' }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.2 } }).toDestination();
+            synth.triggerAttackRelease("C6", "8n", Tone.now());
+        }
 
         // --- Model Creation ---
-        function createDogModel(isShadow = false) {
+        function createDogModel({isShadow = false, isAlly = false, isLegendary = false} = {}) {
             const group = new THREE.Group();
+            let color = isShadow ? 0x444444 : 0xcd853f;
+            if (isLegendary) {
+                color = 0xffd700; // Gold for legendary
+            } else if (isAlly) {
+                color = 0x63b3ed; // Blue for allies
+            }
+
             const dogMat = new THREE.MeshStandardMaterial({ 
-                color: isShadow ? 0x444444 : 0xcd853f, 
-                roughness: 0.7,
-                transparent: isShadow,
-                opacity: isShadow ? 0.7 : 1.0
+                color: color, roughness: 0.7, transparent: isShadow,
+                opacity: isShadow ? 0.7 : 1.0,
+                emissive: isLegendary ? color : 0x000000,
+                emissiveIntensity: isLegendary ? 0.5 : 0
             });
 
             const bodyGeo = new THREE.CapsuleGeometry(2, 3, 4, 16);
@@ -669,6 +906,15 @@
             tail.rotation.x = Math.PI / 4;
             group.add(tail);
 
+            if (!isAlly && !isLegendary) {
+                const swirlGeo = new THREE.TorusGeometry(1, 0.2, 8, 16);
+                const swirlMat = new THREE.MeshStandardMaterial({ color: 0xf6ad55 });
+                const swirl = new THREE.Mesh(swirlGeo, swirlMat);
+                swirl.position.set(-2.1, 3.5, 0);
+                swirl.rotation.y = Math.PI / 2;
+                group.add(swirl);
+            }
+
             return group;
         }
 
@@ -678,8 +924,21 @@
             attackedEnemies.filter(e => e.hp <= 0).forEach(deadEnemy => {
                 const index = enemies.findIndex(e => e.id === deadEnemy.id);
                 if (index > -1) {
+                    const deadEnemyPosition = deadEnemy.mesh.position.clone();
                     scene.remove(deadEnemy.mesh);
                     enemies.splice(index, 1);
+                    player.addSoultimate(15);
+
+                    if (Math.random() < 0.25) {
+                        player.yokaiMedals++;
+                        showMessage("You got a Yo-kai Medal!", 2500);
+                        createMedalEffect(deadEnemyPosition);
+                        if (player.yokaiMedals >= 45 && !player.hasYokaiWatch) {
+                            player.hasYokaiWatch = true;
+                            updateStatsUI();
+                            startBossFight();
+                        }
+                    }
                 }
             });
 
@@ -689,15 +948,16 @@
                 player.killCount += count;
                 
                 checkUnlocks(oldLevel);
-
                 player.updateStats();
                 updateStatsUI();
             }
+            
             if (Math.floor(player.killCount / KILLS_PER_RANK) > Math.floor(oldKillCount / KILLS_PER_RANK)) {
                 if (!["Legendary", "Legendary VIP", "UltiMeow"].includes(player.rank)) {
                     rankUp(Math.floor(player.killCount / KILLS_PER_RANK));
                 }
             }
+
             if (count > 0 && !bossFightActive) {
                 spawnEnemies(count);
             }
@@ -770,7 +1030,6 @@
             occupied.add(`${player.gridX},${player.gridY}`);
 
             for (let i = 0; i < count; i++) {
-                if (enemies.length >= BOSS_TRIGGER_COUNT) break;
                 let gridX, gridY, attempts = 0;
                 do {
                     gridX = Math.floor(Math.random() * MAP_SIZE);
@@ -790,22 +1049,125 @@
                     occupied.add(`${gridX},${gridY}`);
                 }
             }
-            if (!bossFightActive && enemies.length >= BOSS_TRIGGER_COUNT) {
-                startBossFight();
+        }
+        
+        // --- Summoning Logic ---
+        function summonAlly() {
+            if (player.yokaiMedals <= 0 || player.isAttacking) {
+                showMessage(player.isAttacking ? "Cannot summon while attacking!" : "No medals to summon!", 2000);
+                return;
             }
+            player.isAttacking = true;
+            player.yokaiMedals--;
+            updateStatsUI();
+            
+            const isLegendary = true; // Set to 100% chance
+            const summonPosition = player.mesh.position.clone().add(new THREE.Vector3(0, 5, 10));
+
+            createSummoningJingle(isLegendary);
+            createSummoningPortalEffect(summonPosition, isLegendary);
+
+            setTimeout(() => {
+                if (isLegendary) {
+                    showMessage("WOW! A Legendary Yo-kai has joined you permanently!", 4000);
+                } else {
+                    showMessage("Go, my friend!", 2000);
+                }
+
+                const id = `ally-${nextAllyId++}`;
+                const allyMesh = createDogModel({isAlly: true, isLegendary: isLegendary});
+                allyMesh.position.copy(summonPosition);
+                scene.add(allyMesh);
+
+                const ally = {
+                    id: id, mesh: allyMesh, attack: isLegendary ? 500 : 150,
+                    attackCooldown: 1500, lastAttackTime: 0,
+                    spawnTime: Date.now(), isLegendary: isLegendary
+                };
+                alliedYoKai.push(ally);
+                
+                const auraColor = isLegendary ? 0xffd700 : 0x63b3ed;
+                const auraDuration = isLegendary ? Infinity : ALLY_LIFETIME;
+                createAuraEffect(ally.mesh, auraColor, `ally-aura-${ally.id}`, auraDuration);
+            }, 1000); // Delay appearance to sync with portal
+
+            setTimeout(() => { player.isAttacking = false; }, 2500); // Cooldown for summoning
+        }
+
+        function createSummoningPortalEffect(position, isLegendary) {
+            const vertexShader = `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `;
+            const fragmentShader = `
+                varying vec2 vUv;
+                uniform float u_time;
+                uniform vec3 u_color;
+
+                void main() {
+                    vec2 uv = vUv - 0.5;
+                    float dist = length(uv);
+                    
+                    float angle = atan(uv.y, uv.x);
+                    float spiral = angle + (1.0 / (dist + 0.1)) * u_time * 2.0;
+                    
+                    float colorValue = sin(spiral * 5.0) * 0.5 + 0.5;
+                    
+                    float alpha = smoothstep(0.5, 0.4, dist);
+                    
+                    gl_FragColor = vec4(u_color * colorValue, alpha);
+                }
+            `;
+
+            const portalGeo = new THREE.PlaneGeometry(TILE_SIZE * 2, TILE_SIZE * 2);
+            const portalMat = new THREE.ShaderMaterial({
+                uniforms: {
+                    u_time: { value: 0.0 },
+                    u_color: { value: isLegendary ? new THREE.Color(0xffd700) : new THREE.Color(0x63b3ed) }
+                },
+                vertexShader,
+                fragmentShader,
+                transparent: true,
+                depthWrite: false
+            });
+
+            const portal = new THREE.Mesh(portalGeo, portalMat);
+            portal.position.copy(position);
+            scene.add(portal);
+
+            activeEffects.push({
+                mesh: portal, startTime: Date.now(), duration: 2000,
+                type: 'summoningPortal'
+            });
         }
         
         // --- Boss Logic ---
         function startBossFight() {
+            if (bossFightActive) return;
             bossFightActive = true;
-            showMessage("The horde vanishes... A BOSS appears!", 4000);
+            showMessage("Your Yo-kai Watch reacts! A BOSS appears!", 4000);
             
+            // Clear normal enemies
             [...enemies].forEach(enemy => scene.remove(enemy.mesh));
             enemies.length = 0;
 
+            // Preserve legendary allies, remove normal ones
+            const nonLegendaryAllies = alliedYoKai.filter(ally => !ally.isLegendary);
+            nonLegendaryAllies.forEach(ally => {
+                scene.remove(ally.mesh);
+                const auraIndex = activeEffects.findIndex(e => e.effectId === `ally-aura-${ally.id}`);
+                if (auraIndex > -1) {
+                    scene.remove(activeEffects[auraIndex].mesh);
+                    activeEffects.splice(auraIndex, 1);
+                }
+            });
+            alliedYoKai.splice(0, alliedYoKai.length, ...alliedYoKai.filter(ally => ally.isLegendary));
+
             bossHealthBar.style.display = 'block';
             tauntUI.classList.remove('hidden');
-            instructionsElement.textContent += " | G: Taunt";
             playBossMusic();
 
             spawnBoss();
@@ -825,8 +1187,6 @@
                 bossMaxHp = 1000000000000000000000000000;
                 showMessage("The Alpha Dog is empowered by your UltiMeow rank!", 4000);
             }
-            boss = { maxHp: bossMaxHp, hp: bossMaxHp, attack: 50, gridX, gridY };
-            
             const group = new THREE.Group();
             const mat = new THREE.MeshStandardMaterial({ color: 0xff4444, roughness: 0.4 });
             
@@ -856,27 +1216,57 @@
             earR.position.set(4, 6, 0);
             group.add(earR);
 
-            boss.mesh = group;
+            boss = { 
+                maxHp: bossMaxHp, hp: bossMaxHp, attack: 50, gridX, gridY, 
+                attackModifier: 1.0, mesh: group, isMoving: false,
+                targetPosition: new THREE.Vector3(), startPosition: new THREE.Vector3(),
+                moveProgress: 0
+            };
+
             const pos = gridToWorld(gridX, gridY);
             boss.mesh.position.set(pos.x, TILE_SIZE / 2, pos.z);
+            boss.startPosition.copy(boss.mesh.position);
+            boss.targetPosition.copy(boss.mesh.position);
             scene.add(boss.mesh);
         }
 
         function bossAttack() {
-            if (gameOver || !boss) return;
+            if (gameOver || !boss || boss.isMoving) return;
+
             showMessage("Boss uses Assemble the Pack!", 2000);
             createDogWaveEffect();
             
             setTimeout(() => {
                 const attackRadius = TILE_SIZE * 2.5;
                 if (player.mesh.position.distanceTo(boss.mesh.position) < attackRadius) {
-                    player.hp -= boss.attack;
+                    const damage = Math.round(boss.attack * boss.attackModifier);
+                    player.hp -= damage;
                     if (player.hp < 0) player.hp = 0;
+                    player.addSoultimate(damage / 2);
                     updateStatsUI();
-                    showMessage(`The pack overruns you! -${boss.attack} HP`, 2000);
+                    showMessage(`The pack overruns you! -${damage} HP`, 2000);
                     if (player.hp <= 0) endGame(false);
                 }
             }, 1000);
+
+            setTimeout(() => {
+                if (gameOver || !boss) return;
+                const possibleMoves = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+                const move = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
+                const newX = boss.gridX + move[0];
+                const newY = boss.gridY + move[1];
+
+                if (newX >= 0 && newX < MAP_SIZE && newY >= 0 && newY < MAP_SIZE && (newX !== player.gridX || newY !== player.gridY)) {
+                    boss.isMoving = true;
+                    boss.gridX = newX;
+                    boss.gridY = newY;
+                    boss.startPosition.copy(boss.mesh.position);
+                    const targetPos = gridToWorld(newX, newY);
+                    targetPos.y = TILE_SIZE / 2;
+                    boss.targetPosition.copy(targetPos);
+                    boss.moveProgress = 0;
+                }
+            }, 2000);
         }
 
         // --- Game State & Animation ---
@@ -905,6 +1295,7 @@
             const delta = clock.getDelta();
             const now = Date.now();
 
+            // Player Movement
             if (player.isMoving) {
                 player.moveProgress += delta * 4;
                 const easedProgress = 1 - Math.pow(1 - player.moveProgress, 3);
@@ -923,6 +1314,7 @@
                         if (enemyOnTile) {
                             player.hp -= enemyOnTile.attack;
                             if (player.hp < 0) player.hp = 0;
+                            player.addSoultimate(10);
                             updateStatsUI();
                             showMessage(`Landed on a Dog! Ouch! -${enemyOnTile.attack} HP`, 2000);
                             if (player.hp <= 0) endGame(false);
@@ -930,7 +1322,74 @@
                     }
                 }
             }
+
+            // Boss Movement
+            if (boss && boss.isMoving) {
+                boss.moveProgress += delta * 2; // Boss moves slower
+                const easedProgress = 1 - Math.pow(1 - boss.moveProgress, 3);
+                boss.mesh.position.lerpVectors(boss.startPosition, boss.targetPosition, easedProgress);
+                if (boss.moveProgress >= 1) {
+                    boss.isMoving = false;
+                    boss.moveProgress = 0;
+                    boss.mesh.position.copy(boss.targetPosition);
+                }
+            }
+
+            // Allied Yo-kai AI
+            for (let i = alliedYoKai.length - 1; i >= 0; i--) {
+                const ally = alliedYoKai[i];
+
+                if (!ally.isLegendary && now - ally.spawnTime > ALLY_LIFETIME) {
+                    scene.remove(ally.mesh);
+                    const auraIndex = activeEffects.findIndex(e => e.effectId === `ally-aura-${ally.id}`);
+                    if (auraIndex > -1) {
+                        scene.remove(activeEffects[auraIndex].mesh);
+                        activeEffects.splice(auraIndex, 1);
+                    }
+                    alliedYoKai.splice(i, 1);
+                    continue;
+                }
+
+                let nearestEnemy = null;
+                let minDistance = Infinity;
+                const potentialTargets = bossFightActive ? (boss ? [boss] : []) : enemies;
+                potentialTargets.forEach(enemy => {
+                    const distance = ally.mesh.position.distanceTo(enemy.mesh.position);
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        nearestEnemy = enemy;
+                    }
+                });
+
+                if (nearestEnemy) {
+                    const direction = new THREE.Vector3().subVectors(nearestEnemy.mesh.position, ally.mesh.position).normalize();
+                    const speed = 25 * delta;
+                    const attackRange = TILE_SIZE * 1.2;
+                    if (minDistance < attackRange) {
+                        if (now - ally.lastAttackTime > ally.attackCooldown) {
+                            ally.lastAttackTime = now;
+                            createSlashEffect(ally.mesh.position, 0);
+
+                            if (bossFightActive) {
+                                boss.hp -= ally.attack;
+                                if (boss.hp < 0) boss.hp = 0;
+                                updateStatsUI();
+                                if (boss.hp <= 0) endGame(true);
+                            } else {
+                                nearestEnemy.hp -= ally.attack;
+                                if (nearestEnemy.hp <= 0) {
+                                    handleEnemyDefeat([nearestEnemy], 1);
+                                }
+                            }
+                        }
+                    } else {
+                        ally.mesh.position.add(direction.multiplyScalar(speed));
+                    }
+                    ally.mesh.lookAt(nearestEnemy.mesh.position);
+                }
+            }
             
+            // Active Effects
             for (let i = activeEffects.length - 1; i >= 0; i--) {
                 const effect = activeEffects[i];
                 const age = now - effect.startTime;
@@ -938,33 +1397,22 @@
                 if (progress < 0) continue;
                 if (progress > 1) progress = 1;
 
-                if (effect.type === 'giantSwordSlam') {
-                    const sword = effect.mesh;
-                    const playerMesh = player.mesh;
-                    if (progress < 0.4) {
-                        const phaseProgress = progress / 0.4;
-                        playerMesh.rotation.x = -THREE.MathUtils.lerp(0, Math.PI / 3, phaseProgress);
-                        playerMesh.position.y = THREE.MathUtils.lerp(0, 5, phaseProgress);
-                    } else if (progress < 0.5) {
-                        if (!effect.slammed) {
-                            createShockwaveEffect(playerMesh.position, 0xf687b3, effect.radius * 2, 0.4);
-                            effect.dealDamage();
-                            effect.slammed = true;
-                        }
-                        const phaseProgress = (progress - 0.4) / 0.1;
-                        playerMesh.rotation.x = -THREE.MathUtils.lerp(Math.PI / 3, 0, phaseProgress);
-                        playerMesh.position.y = THREE.MathUtils.lerp(5, 0, phaseProgress);
-                    } else {
-                        const phaseProgress = (progress - 0.5) / 0.5;
-                        sword.material.opacity = 1.0 - phaseProgress;
-                    }
-                    if (progress >= 1) {
-                        playerMesh.rotation.set(0,0,0);
-                        playerMesh.remove(sword);
-                    }
-                } else if (effect.type === 'jibanyanPaw') {
-                    effect.mesh.position.lerpVectors(effect.startPosition, effect.targetPosition, progress);
+                if (effect.type === 'slash') {
                     effect.mesh.material.opacity = 1.0 - progress;
+                    effect.mesh.scale.set(progress, progress, progress);
+                } else if (effect.type === 'jibanyanPaw' || effect.type === 'sword') {
+                    effect.mesh.position.lerpVectors(effect.startPosition, effect.targetPosition, progress);
+                    if (effect.mesh.isGroup) {
+                        effect.mesh.traverse(child => {
+                            if (child.isMesh) {
+                                if (!child.material.transparent) child.material.transparent = true;
+                                child.material.opacity = 1.0 - progress;
+                            }
+                        });
+                    } else {
+                        if (!effect.mesh.material.transparent) effect.mesh.material.transparent = true;
+                        effect.mesh.material.opacity = 1.0 - progress;
+                    }
                 } else if (effect.type === 'explosionParticle') {
                     const gravity = 20.0;
                     effect.velocity.y -= gravity * delta;
@@ -976,13 +1424,34 @@
                         if (child.isMesh) child.material.opacity = 1.0 - progress;
                     });
                 } else if (effect.type === 'shrink') {
-                    const scale = 1.0 - progress;
-                    effect.mesh.scale.set(scale, scale, scale);
+                    effect.mesh.scale.set(1.0 - progress, 1.0 - progress, 1.0 - progress);
                 } else if (effect.type === 'evolutionFlash') {
                     effect.mesh.intensity = (1.0 - Math.abs(progress - 0.5) * 2) * 20;
+                } else if (effect.type === 'aura') {
+                    if (effect.target) {
+                        effect.mesh.position.copy(effect.target.position);
+                    }
+                    if (effect.duration !== Infinity) {
+                         effect.mesh.material.opacity = (1.0 - progress) * 0.4;
+                    }
+                } else if (effect.type === 'medal') {
+                    effect.mesh.rotation.y += delta * 5;
+                    effect.mesh.position.y += delta * 5;
+                    effect.mesh.material.opacity = 1.0 - progress;
+                } else if (effect.type === 'summoningPortal') {
+                    effect.mesh.material.uniforms.u_time.value += delta;
+                    effect.mesh.quaternion.copy(camera.quaternion); // Always face camera
+                    
+                    const scaleProgress = Math.min(age / 500, 1.0); // Grow in 0.5s
+                    const scale = Math.sin(scaleProgress * Math.PI / 2);
+                    effect.mesh.scale.set(scale, scale, scale);
+
+                    if (progress > 0.75) { // Fade out in last 25% of life
+                        effect.mesh.material.opacity = (1.0 - progress) * 4.0;
+                    }
                 }
 
-                if (progress >= 1) {
+                if (progress >= 1 && effect.duration !== Infinity) {
                     scene.remove(effect.mesh);
                     activeEffects.splice(i, 1);
                 }
@@ -1019,12 +1488,14 @@
                 case 'ArrowDown': movePlayer(0, 1); break;
                 case 'ArrowLeft': movePlayer(-1, 0); break;
                 case 'ArrowRight': movePlayer(1, 0); break;
-                case 'y': case 'Y': salmonBladeAttack(); break;
+                case 'y': case 'Y': sharpClawsAttack(); break;
                 case 'a': case 'A': pawsOfFuryAttack(); break;
                 case 't': case 'T': catWaveAttack(); break;
-                case 'r': case 'R': catastropheAttack(); break;
-                case 'k': case 'K': legendaryBladeAttack(); break;
+                case 'e': case 'E': clawRushAttack(); break;
+                case 'r': case 'R': inspiritBoss(); break;
                 case 'g': case 'G': tauntBoss(); break;
+                case 's': case 'S': summonAlly(); break;
+                case 'k': case 'K': gigantaBladeAttack(); break;
             }
         };
         window.addEventListener('keydown', handleKeyDown);
@@ -1042,24 +1513,46 @@
             Tone.Transport.cancel();
         }
 
+        function createSummoningJingle(isLegendary) {
+            const synth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: 'fmsine' },
+                envelope: { attack: 0.01, decay: 0.2, sustain: 0.2, release: 0.5 }
+            }).toDestination();
+            const now = Tone.now();
+            if(isLegendary) {
+                const chords = [["C5", "E5", "G5"], ["F5", "A5", "C6"], ["G5", "B5", "D6"]];
+                synth.triggerAttackRelease(chords[0], "8n", now);
+                synth.triggerAttackRelease(chords[1], "8n", now + 0.2);
+                synth.triggerAttackRelease(chords[2], "4n", now + 0.4);
+            } else {
+                const notes = ["C5", "E5", "G5", "A5", "G5", "E5"];
+                notes.forEach((note, i) => {
+                    synth.triggerAttackRelease(note, "16n", now + i * 0.1);
+                });
+            }
+        }
+
         function playAdventureMusic() {
             stopAllMusic();
-            const melodySynth = new Tone.Synth({ oscillator: { type: "pulse" }, envelope: { attack: 0.01, decay: 0.1, sustain: 0.2, release: 0.2 } }).toDestination();
+            const melodySynth = new Tone.FMSynth({
+                harmonicity: 1.5, modulationIndex: 1.2, oscillator: { type: "sine" },
+                envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.2 },
+            }).toDestination();
             const bassSynth = new Tone.MonoSynth({ oscillator: { type: "fatsawtooth" }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.2 } }).toDestination();
-            bassSynth.volume.value = -10;
+            bassSynth.volume.value = -12;
 
-            const melodyNotes = ["C4", "E4", "G4", "A4", "G4", "E4", "C4", null];
-            const bassNotes = ["C2", null, "F2", null, "G2", null, "C2", null];
+            const melodyNotes = ["G4", "A4", "B4", "G4", "B4", "A4", "G4", "E4", "D4", "E4", "G4", null, "G4", "A4", "B4", "C5"];
+            const bassNotes = ["G2", "G2", "C2", "C2", "D2", "D2", "G2", "D2"];
 
             adventureMusic.melody = new Tone.Sequence((time, note) => {
-                if(note) melodySynth.triggerAttackRelease(note, "8n", time);
-            }, melodyNotes, "4n").start(0);
+                if(note) melodySynth.triggerAttackRelease(note, "16n", time);
+            }, melodyNotes, "8n").start(0);
 
             adventureMusic.bass = new Tone.Sequence((time, note) => {
-                if(note) bassSynth.triggerAttackRelease(note, "2n", time);
+                if(note) bassSynth.triggerAttackRelease(note, "4n", time);
             }, bassNotes, "2n").start(0);
 
-            Tone.Transport.bpm.value = 120;
+            Tone.Transport.bpm.value = 135;
             Tone.Transport.start();
         }
 
