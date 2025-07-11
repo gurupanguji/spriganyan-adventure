@@ -630,12 +630,14 @@
                 totalDamage = player.attack * 2.5;
                 message = 'Claw Rush!';
                 
-                // NEW: Use Paws of Fury-style effect for Claw Rush
-                for (let i = 0; i < 8; i++) {
-                    createJibanyanPawsEffect(nearestEnemy.mesh.position, i * 60);
-                }
+                createClawRushEffect(nearestEnemy);
 
                 setTimeout(() => {
+                    // Check if target is still valid before dealing damage
+                    const targetStillExists = bossFightActive ? boss : enemies.find(e => e.id === nearestEnemy.id);
+                    if (!targetStillExists) return;
+
+                    createSlashEffect(nearestEnemy.mesh.position, 0); // Visual hit effect
                     if (bossFightActive) {
                         boss.hp -= totalDamage;
                         if (boss.hp < 0) boss.hp = 0;
@@ -726,6 +728,35 @@
                 duration: 300,
                 type: 'slash'
             });
+        }
+
+        function createClawRushEffect(target) {
+            const rushCount = 6;
+            const radius = TILE_SIZE * 0.7;
+            for (let i = 0; i < rushCount; i++) {
+                const angle = (i / rushCount) * Math.PI * 2;
+                const startOffset = new THREE.Vector3(Math.cos(angle + Math.PI) * radius, 0, Math.sin(angle + Math.PI) * radius);
+                const endOffset = new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
+                
+                const startPos = target.mesh.position.clone().add(startOffset);
+                const endPos = target.mesh.position.clone().add(endOffset);
+
+                const dashGeo = new THREE.BoxGeometry(2, 6, 2);
+                const dashMesh = new THREE.Mesh(dashGeo, player.materials.body.clone());
+                dashMesh.material.transparent = true;
+                
+                scene.add(dashMesh);
+
+                activeEffects.push({
+                    mesh: dashMesh,
+                    startTime: Date.now() + i * 100,
+                    duration: 200,
+                    type: 'clawRushDash',
+                    startPosition: startPos,
+                    targetPosition: endPos,
+                    target: target
+                });
+            }
         }
         
         function createSwordEffect(targetPosition, delay) {
@@ -1397,58 +1428,72 @@
                 if (progress < 0) continue;
                 if (progress > 1) progress = 1;
 
-                if (effect.type === 'slash') {
-                    effect.mesh.material.opacity = 1.0 - progress;
-                    effect.mesh.scale.set(progress, progress, progress);
-                } else if (effect.type === 'jibanyanPaw' || effect.type === 'sword') {
-                    effect.mesh.position.lerpVectors(effect.startPosition, effect.targetPosition, progress);
-                    if (effect.mesh.isGroup) {
+                switch(effect.type) {
+                    case 'slash':
+                        effect.mesh.material.opacity = 1.0 - progress;
+                        effect.mesh.scale.set(progress, progress, progress);
+                        break;
+                    case 'clawRushDash':
+                        effect.mesh.material.opacity = 1.0 - progress;
+                        effect.mesh.position.lerpVectors(effect.startPosition, effect.targetPosition, progress);
+                        break;
+                    case 'jibanyanPaw':
+                        effect.mesh.position.lerpVectors(effect.startPosition, effect.targetPosition, progress);
+                        if (!effect.mesh.material.transparent) effect.mesh.material.transparent = true;
+                        effect.mesh.material.opacity = 1.0 - progress;
+                        break;
+                    case 'sword':
+                        effect.mesh.position.lerpVectors(effect.startPosition, effect.targetPosition, progress);
                         effect.mesh.traverse(child => {
                             if (child.isMesh) {
                                 if (!child.material.transparent) child.material.transparent = true;
                                 child.material.opacity = 1.0 - progress;
                             }
                         });
-                    } else {
-                        if (!effect.mesh.material.transparent) effect.mesh.material.transparent = true;
+                        break;
+                    case 'explosionParticle':
+                        const gravity = 20.0;
+                        effect.velocity.y -= gravity * delta;
+                        effect.mesh.position.add(effect.velocity.clone().multiplyScalar(delta));
                         effect.mesh.material.opacity = 1.0 - progress;
-                    }
-                } else if (effect.type === 'explosionParticle') {
-                    const gravity = 20.0;
-                    effect.velocity.y -= gravity * delta;
-                    effect.mesh.position.add(effect.velocity.clone().multiplyScalar(delta));
-                    effect.mesh.material.opacity = 1.0 - progress;
-                } else if (effect.type === 'dogWave') {
-                    effect.mesh.position.add(effect.velocity.clone().multiplyScalar(delta));
-                    effect.mesh.traverse(child => {
-                        if (child.isMesh) child.material.opacity = 1.0 - progress;
-                    });
-                } else if (effect.type === 'shrink') {
-                    effect.mesh.scale.set(1.0 - progress, 1.0 - progress, 1.0 - progress);
-                } else if (effect.type === 'evolutionFlash') {
-                    effect.mesh.intensity = (1.0 - Math.abs(progress - 0.5) * 2) * 20;
-                } else if (effect.type === 'aura') {
-                    if (effect.target) {
-                        effect.mesh.position.copy(effect.target.position);
-                    }
-                    if (effect.duration !== Infinity) {
-                         effect.mesh.material.opacity = (1.0 - progress) * 0.4;
-                    }
-                } else if (effect.type === 'medal') {
-                    effect.mesh.rotation.y += delta * 5;
-                    effect.mesh.position.y += delta * 5;
-                    effect.mesh.material.opacity = 1.0 - progress;
-                } else if (effect.type === 'summoningPortal') {
-                    effect.mesh.material.uniforms.u_time.value += delta;
-                    effect.mesh.quaternion.copy(camera.quaternion); // Always face camera
-                    
-                    const scaleProgress = Math.min(age / 500, 1.0); // Grow in 0.5s
-                    const scale = Math.sin(scaleProgress * Math.PI / 2);
-                    effect.mesh.scale.set(scale, scale, scale);
+                        break;
+                    case 'dogWave':
+                        effect.mesh.position.add(effect.velocity.clone().multiplyScalar(delta));
+                        effect.mesh.traverse(child => {
+                            if (child.isMesh) child.material.opacity = 1.0 - progress;
+                        });
+                        break;
+                    case 'shrink':
+                        effect.mesh.scale.set(1.0 - progress, 1.0 - progress, 1.0 - progress);
+                        break;
+                    case 'evolutionFlash':
+                        effect.mesh.intensity = (1.0 - Math.abs(progress - 0.5) * 2) * 20;
+                        break;
+                    case 'aura':
+                        if (effect.target) {
+                            effect.mesh.position.copy(effect.target.position);
+                        }
+                        if (effect.duration !== Infinity) {
+                            effect.mesh.material.opacity = (1.0 - progress) * 0.4;
+                        }
+                        break;
+                    case 'medal':
+                        effect.mesh.rotation.y += delta * 5;
+                        effect.mesh.position.y += delta * 5;
+                        effect.mesh.material.opacity = 1.0 - progress;
+                        break;
+                    case 'summoningPortal':
+                        effect.mesh.material.uniforms.u_time.value += delta;
+                        effect.mesh.quaternion.copy(camera.quaternion); // Always face camera
+                        
+                        const scaleProgress = Math.min(age / 500, 1.0); // Grow in 0.5s
+                        const scale = Math.sin(scaleProgress * Math.PI / 2);
+                        effect.mesh.scale.set(scale, scale, scale);
 
-                    if (progress > 0.75) { // Fade out in last 25% of life
-                        effect.mesh.material.opacity = (1.0 - progress) * 4.0;
-                    }
+                        if (progress > 0.75) { // Fade out in last 25% of life
+                            effect.mesh.material.opacity = (1.0 - progress) * 4.0;
+                        }
+                        break;
                 }
 
                 if (progress >= 1 && effect.duration !== Infinity) {
@@ -1515,20 +1560,38 @@
 
         function createSummoningJingle(isLegendary) {
             const synth = new Tone.PolySynth(Tone.Synth, {
-                oscillator: { type: 'fmsine' },
-                envelope: { attack: 0.01, decay: 0.2, sustain: 0.2, release: 0.5 }
+                oscillator: { type: 'triangle' },
+                envelope: { attack: 0.01, decay: 0.3, sustain: 0.1, release: 0.4 }
             }).toDestination();
+            synth.volume.value = -6;
             const now = Tone.now();
+
             if(isLegendary) {
-                const chords = [["C5", "E5", "G5"], ["F5", "A5", "C6"], ["G5", "B5", "D6"]];
-                synth.triggerAttackRelease(chords[0], "8n", now);
-                synth.triggerAttackRelease(chords[1], "8n", now + 0.2);
-                synth.triggerAttackRelease(chords[2], "4n", now + 0.4);
-            } else {
-                const notes = ["C5", "E5", "G5", "A5", "G5", "E5"];
+                // "Imaginary, Incendiary... Legendary!" jingle
+                const legendarySynth = new Tone.PolySynth(Tone.Synth, {
+                    oscillator: { type: 'fatsawtooth' },
+                    envelope: { attack: 0.05, decay: 0.5, sustain: 0.3, release: 0.6 }
+                }).toDestination();
+                legendarySynth.volume.value = -4;
+                
+                const notes = ["C4", "E4", "G4", "C5", "E5", "G5", "C6"];
                 notes.forEach((note, i) => {
-                    synth.triggerAttackRelease(note, "16n", now + i * 0.1);
+                    legendarySynth.triggerAttackRelease(note, "16n", now + i * 0.12);
                 });
+                legendarySynth.triggerAttackRelease(["C5", "E5", "G5"], "2n", now + notes.length * 0.12);
+
+            } else {
+                // "Alarming, Boom boom... Charming!" jingle
+                const notes = [
+                    "G5", "G5", "A5", "G5", "F5", "E5", "D5",
+                    "C5", "C5", "D5", "E5", "F5", "G5"
+                ];
+                const timings = [0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.2, 1.35, 1.5, 1.65, 1.8, 1.95];
+                
+                notes.forEach((note, i) => {
+                    synth.triggerAttackRelease(note, "16n", now + timings[i]);
+                });
+                synth.triggerAttackRelease(["C5", "E5", "G5"], "4n", now + 2.2);
             }
         }
 
